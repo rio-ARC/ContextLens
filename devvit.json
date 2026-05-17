@@ -1,0 +1,53 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "modbrief",
+  "post": {
+    "dir": "public",
+    "entrypoints": {
+      "default": {
+        "entry": "index.html",
+        "height": "tall"
+      }
+    }
+  },
+  "server": {
+    "entry": "server/index.js"
+  },
+  "permissions": {
+    "redis": true,
+    "reddit": {
+      "enable": true,
+      "scope": "moderator"
+    }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "View user context",
+        "description": "Show moderation context for this user",
+        "forUserType": "moderator",
+        "location": [
+          "post",
+          "comment"
+        ],
+        "endpoint": "/internal/menu/view-context"
+      }
+    ]
+  },
+  "forms": {
+    "contextForm": "/internal/form/context-submit",
+    "modNoteForm": "/internal/form/mod-note-submit",
+    "removeContentForm": "/internal/form/remove-content-submit",
+    "banUserForm": "/internal/form/ban-user-submit"
+  },
+  "marketingAssets": {
+    "icon": "assets/icon.png"
+  },
+  "dev": {
+    "subreddit": "rio_test"
+  },
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build && npx esbuild src/server/main.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/server/server/index.js --external:@devvit/* --external:zlib --external:util --external:buffer"
+  }
+}
