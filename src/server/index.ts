@@ -135,6 +135,8 @@ app.post('/internal/menu/view-context', async (c) => {
   // Persist username for the async form submission handler (context is not available there)
   const userId = context.userId ?? 'unknown';
   await redis.set('contextlens:pending:' + userId, username, { expiration: new Date(Date.now() + 300_000) });
+  await redis.set('contextlens:pending_subreddit:' + userId, subredditName, { expiration: new Date(Date.now() + 300_000) });
+  await redis.set('contextlens:pending_contentId:' + userId, author.contentId || '', { expiration: new Date(Date.now() + 300_000) });
 
   // Fetch context (may use cache)
   let response: ContextResponse;
@@ -391,25 +393,29 @@ app.post('/internal/form/ban-user-submit', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/pending-user  — Retrieve pending user data when webview loads
+// ---------------------------------------------------------------------------
+
+app.get('/api/pending-user', async (c) => {
+  const userId = context.userId ?? 'unknown';
+  const username = await redis.get('contextlens:pending:' + userId);
+  const subredditName = (await redis.get('contextlens:pending_subreddit:' + userId)) ?? context.subredditName ?? '';
+  const contentId = (await redis.get('contextlens:pending_contentId:' + userId)) ?? '';
+
+  return c.json({
+    username: username || '',
+    subredditName: subredditName || '',
+    contentId: contentId || '',
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/context/:username  — WebView data fetch
 // ---------------------------------------------------------------------------
 
 app.get('/api/context/:username', async (c) => {
-  let username = c.req.param('username');
+  const username = c.req.param('username');
   const subredditName = c.req.query('subredditName') ?? context.subredditName ?? '';
-
-  // '__pending__' is sent by the WebView when no username is in the URL
-  // (Devvit's iFrame URL doesn't forward Reddit post URL query params).
-  // Resolve it from the Redis key the menu handler stored.
-  if (username === '__pending__') {
-    const userId = context.userId ?? '';
-    const stored = await redis.get('contextlens:pending:' + userId);
-    if (!stored) {
-      console.error('ContextLens: /api/context/__pending__ — no pending user in Redis for userId:', userId);
-      return c.json({ error: 'No pending user. Please re-open from the context menu.' }, 404);
-    }
-    username = stored;
-  }
 
   try {
     const response = await buildContextResponse(subredditName, username);

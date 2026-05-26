@@ -12,23 +12,43 @@ export default function App() {
   const [data, setData] = useState<ContextResponse | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  const queryParams = new URLSearchParams(window.location.search);
-  // When opened via navigateTo from a Devvit form, window.location.search is empty
-  // because Devvit serves the WebView iFrame from a CDN URL, not the Reddit post URL.
-  // Use '__pending__' so the server resolves the username from Redis.
-  const username = queryParams.get('username') || '__pending__';
-  const subredditName = queryParams.get('subreddit') || '';
-  const contentId = queryParams.get('contentId') || '';
+  const [resolvedUsername, setResolvedUsername] = useState('');
+  const [resolvedSubreddit, setResolvedSubreddit] = useState('');
+  const [resolvedContentId, setResolvedContentId] = useState('');
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      // If no username at all and we're in __pending__ mode, server will resolve it.
-      // Only bail out if the fetch itself fails or server returns 404.
       setStatus('loading');
       try {
-        const res = await fetch(`/api/context/${encodeURIComponent(username)}${window.location.search}`);
+        const queryParams = new URLSearchParams(window.location.search);
+        let u = queryParams.get('username') || '';
+        let s = queryParams.get('subreddit') || '';
+        let cId = queryParams.get('contentId') || '';
+
+        if (!u) {
+          const pendingRes = await fetch('/api/pending-user');
+          if (pendingRes.ok) {
+            const pendingData = await pendingRes.json();
+            u = pendingData.username || '';
+            s = pendingData.subredditName || '';
+            cId = pendingData.contentId || '';
+          }
+        }
+
+        if (!u) {
+          if (!cancelled) setStatus('error');
+          return;
+        }
+
+        if (!cancelled) {
+          setResolvedUsername(u);
+          setResolvedSubreddit(s);
+          setResolvedContentId(cId);
+        }
+
+        const res = await fetch(`/api/context/${encodeURIComponent(u)}?subredditName=${encodeURIComponent(s)}`);
         if (!res.ok) {
           if (!cancelled) setStatus('error');
           return;
@@ -47,7 +67,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [username, retryCount]);
+  }, [retryCount]);
 
   if (status === 'loading') {
     return <LoadingState />;
@@ -148,9 +168,9 @@ export default function App() {
       {/* QuickActions bar fixed to bottom (always visible) */}
       {data && (
         <QuickActions
-          username={username}
-          subredditName={subredditName}
-          contentId={contentId}
+          username={resolvedUsername}
+          subredditName={resolvedSubreddit}
+          contentId={resolvedContentId}
           summaryText={data.summary.text}
         />
       )}
