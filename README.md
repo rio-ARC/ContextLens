@@ -26,6 +26,17 @@ When a moderator right-clicks any post or comment and selects "View user context
   - When the context menu is clicked, user and post metadata are cached in Redis keyed under the moderator's `userId`.
   - When the WebView iframe loads inside the custom post (where Reddit does not forward query parameters), the client queries the `/api/pending-user` endpoint to resolve the active context seamlessly.
 
+## Permissions & Security
+
+ContextLens is built with security, data privacy, and Reddit's guidelines in mind:
+
+- **Data Privacy**: No moderator or user data is ever sent to or processed by external third-party services. All computations, narrative generations, and KV storage are handled completely within Reddit's sandboxed Devvit environment.
+- **Moderator Enforcement**: The right-click menu item is restricted to moderators via the `"forUserType": "moderator"` configuration. Additionally, all underlying server-side API endpoints, forms, and custom post WebViews verify moderator status before exposing any context data or accepting action requests. Non-moderators attempting to query API endpoints or open the custom post will receive a `403 Forbidden` error.
+- **Granular Mod Permissions**: All quick moderation actions verify that the executing moderator possesses the appropriate permissions on the subreddit:
+  - **Reading Data & Adding Notes**: Allowed for any moderator on the subreddit.
+  - **Removing Content**: Requires the moderator to have the `posts` permission.
+  - **Banning Users**: Requires the moderator to have the `access` (user management) permission.
+
 ## Project Structure
 
 ```

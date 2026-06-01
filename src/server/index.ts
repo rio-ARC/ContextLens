@@ -57,6 +57,50 @@ async function resolveAuthor(
 }
 
 // ---------------------------------------------------------------------------
+// Helpers: Moderator status and permission checks
+// ---------------------------------------------------------------------------
+
+async function requireModerator(subredditName: string): Promise<string | null> {
+  const currentUsername = await reddit.getCurrentUsername();
+  if (!currentUsername) return null;
+
+  try {
+    const mods = await reddit.getModerators({ subredditName, username: currentUsername });
+    const modList = await mods.all();
+    if (modList.length === 0) return null;
+    return currentUsername;
+  } catch (err) {
+    console.error('requireModerator check failed', err);
+    return null;
+  }
+}
+
+async function requireModPermission(
+  subredditName: string,
+  requiredPermission: string
+): Promise<string | null> {
+  const currentUsername = await reddit.getCurrentUsername();
+  if (!currentUsername) return null;
+
+  try {
+    const mods = await reddit.getModerators({ subredditName, username: currentUsername });
+    const modList = await mods.all();
+    if (modList.length === 0) return null;
+
+    const modUser = modList[0];
+    const perms = await modUser.getModPermissionsForSubreddit(subredditName);
+    if (perms.includes('all') || perms.includes(requiredPermission as any)) {
+      return currentUsername;
+    }
+    return null;
+  } catch (err) {
+    console.error('requireModPermission check failed', err);
+    return null;
+  }
+}
+
+
+// ---------------------------------------------------------------------------
 // Helper: build context response (cache-aware)
 // ---------------------------------------------------------------------------
 
@@ -90,6 +134,14 @@ async function buildContextResponse(
 
 app.post('/internal/menu/view-context', async (c) => {
   const subredditName = context.subredditName ?? '';
+
+  const isMod = await requireModerator(subredditName);
+  if (!isMod) {
+    return c.json<UiResponse>({
+      showToast: 'Not authorized. You must be a moderator of this subreddit.',
+    });
+  }
+
   const onboarded = await redis.get('contextlens:onboarded:' + subredditName);
   if (onboarded === null || onboarded === undefined) {
     await redis.set('contextlens:onboarded:' + subredditName, 'true');
@@ -267,6 +319,14 @@ app.post('/internal/form/context-submit', async (c) => {
   const { note, openDashboard } = body;
   const subredditName = context.subredditName ?? '';
 
+  const isMod = await requireModerator(subredditName);
+  if (!isMod) {
+    return c.json<UiResponse>({
+      showToast: 'Not authorized. You must be a moderator of this subreddit.',
+    });
+  }
+
+
   // Retrieve the target username stored by the menu handler
   const userId = context.userId ?? 'unknown';
   const username = await redis.get('contextlens:pending:' + userId);
@@ -326,6 +386,14 @@ app.post('/internal/form/mod-note-submit', async (c) => {
   const body = await c.req.json<{ username?: string; note?: string; label?: string }>();
   const subredditName = context.subredditName ?? '';
 
+  const isMod = await requireModerator(subredditName);
+  if (!isMod) {
+    return c.json<UiResponse>({
+      showToast: 'Not authorized. You must be a moderator of this subreddit.',
+    });
+  }
+
+
   if (!body.username || !body.note) {
     return c.json<UiResponse>({ showToast: 'Missing required fields.' });
   }
@@ -350,9 +418,18 @@ app.post('/internal/form/mod-note-submit', async (c) => {
 app.post('/internal/form/remove-content-submit', async (c) => {
   const body = await c.req.json<{ contentId?: string; isSpam?: boolean }>();
 
+  const subredditName = context.subredditName ?? '';
+  const isAuthorized = await requireModPermission(subredditName, 'posts');
+  if (!isAuthorized) {
+    return c.json<UiResponse>({
+      showToast: 'Not authorized. You do not have the required moderator permissions (posts).',
+    });
+  }
+
   if (!body.contentId) {
     return c.json<UiResponse>({ showToast: 'Missing content ID.' });
   }
+
 
   try {
     const id = body.contentId as `t1_${string}` | `t3_${string}`;
@@ -372,9 +449,17 @@ app.post('/internal/form/ban-user-submit', async (c) => {
   const body = await c.req.json<{ username?: string; reason?: string; duration?: number }>();
   const subredditName = context.subredditName ?? '';
 
+  const isAuthorized = await requireModPermission(subredditName, 'access');
+  if (!isAuthorized) {
+    return c.json<UiResponse>({
+      showToast: 'Not authorized. You do not have the required moderator permissions (access).',
+    });
+  }
+
   if (!body.username) {
     return c.json<UiResponse>({ showToast: 'Missing username.' });
   }
+
 
   try {
     await reddit.banUser({
@@ -398,9 +483,16 @@ app.post('/internal/form/ban-user-submit', async (c) => {
 
 app.get('/api/pending-user', async (c) => {
   const userId = context.userId ?? 'unknown';
-  const username = await redis.get('contextlens:pending:' + userId);
   const subredditName = (await redis.get('contextlens:pending_subreddit:' + userId)) ?? context.subredditName ?? '';
+
+  const isMod = await requireModerator(subredditName);
+  if (!isMod) {
+    return c.json({ error: 'Not authorized. You must be a moderator of this subreddit.' }, 403);
+  }
+
+  const username = await redis.get('contextlens:pending:' + userId);
   const contentId = (await redis.get('contextlens:pending_contentId:' + userId)) ?? '';
+
 
   return c.json({
     username: username || '',
@@ -417,6 +509,12 @@ app.get('/api/context/:username', async (c) => {
   const username = c.req.param('username');
   const subredditName = c.req.query('subredditName') ?? context.subredditName ?? '';
 
+  const isMod = await requireModerator(subredditName);
+  if (!isMod) {
+    return c.json({ error: 'Not authorized. You must be a moderator of this subreddit.' }, 403);
+  }
+
+
   try {
     const response = await buildContextResponse(subredditName, username);
     return c.json(response);
@@ -432,7 +530,17 @@ app.get('/api/context/:username', async (c) => {
 
 app.post('/api/actions/add-note', async (c) => {
   const body = await c.req.json<AddModNoteRequest>();
+
+  const isMod = await requireModerator(body.subredditName);
+  if (!isMod) {
+    return c.json<ApiResponse>(
+      { success: false, error: 'Not authorized. You must be a moderator of this subreddit.' },
+      403
+    );
+  }
+
   try {
+
     await reddit.addModNote({
       subreddit: body.subredditName,
       user: body.username,
@@ -450,7 +558,17 @@ app.post('/api/actions/add-note', async (c) => {
 
 app.post('/api/actions/remove-content', async (c) => {
   const body = await c.req.json<RemoveContentRequest>();
+
+  const isAuthorized = await requireModPermission(body.subredditName, 'posts');
+  if (!isAuthorized) {
+    return c.json<ApiResponse>(
+      { success: false, error: 'Not authorized. You do not have the required moderator permissions (posts).' },
+      403
+    );
+  }
+
   try {
+
     const id = body.contentId as `t1_${string}` | `t3_${string}`;
     await reddit.remove(id, body.isSpam ?? false);
     return c.json<ApiResponse>({ success: true });
@@ -465,7 +583,17 @@ app.post('/api/actions/remove-content', async (c) => {
 
 app.post('/api/actions/ban-user', async (c) => {
   const body = await c.req.json<BanUserRequest>();
+
+  const isAuthorized = await requireModPermission(body.subredditName, 'access');
+  if (!isAuthorized) {
+    return c.json<ApiResponse>(
+      { success: false, error: 'Not authorized. You do not have the required moderator permissions (access).' },
+      403
+    );
+  }
+
   try {
+
     await reddit.banUser({
       subredditName: body.subredditName,
       username: body.username,

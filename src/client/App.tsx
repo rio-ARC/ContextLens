@@ -7,7 +7,7 @@ import HistoryTab from './panels/HistoryTab';
 import QuickActions from './panels/QuickActions';
 
 export default function App() {
-  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error' | 'forbidden'>('loading');
   const [tab, setTab] = useState<'summary' | 'signals' | 'history'>('summary');
   const [data, setData] = useState<ContextResponse | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -29,6 +29,10 @@ export default function App() {
 
         if (!u) {
           const pendingRes = await fetch('/api/pending-user');
+          if (pendingRes.status === 403) {
+            if (!cancelled) setStatus('forbidden');
+            return;
+          }
           if (pendingRes.ok) {
             const pendingData = await pendingRes.json();
             u = pendingData.username || '';
@@ -49,6 +53,10 @@ export default function App() {
         }
 
         const res = await fetch(`/api/context/${encodeURIComponent(u)}?subredditName=${encodeURIComponent(s)}`);
+        if (res.status === 403) {
+          if (!cancelled) setStatus('forbidden');
+          return;
+        }
         if (!res.ok) {
           if (!cancelled) setStatus('error');
           return;
@@ -71,6 +79,33 @@ export default function App() {
 
   if (status === 'loading') {
     return <LoadingState />;
+  }
+
+  if (status === 'forbidden') {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          gap: '16px',
+          color: '#e6edf3',
+          padding: '24px',
+          boxSizing: 'border-box',
+          backgroundColor: '#0d1117',
+        }}
+      >
+        <div style={{ fontSize: '3rem' }}>🚫</div>
+        <p style={{ fontSize: '1.2rem', fontWeight: 600, color: '#f85149', textAlign: 'center' }}>
+          Not Authorized
+        </p>
+        <p style={{ fontSize: '0.95rem', color: '#8b949e', textAlign: 'center', maxWidth: '320px' }}>
+          You must be a moderator of this subreddit to view the ContextLens dashboard.
+        </p>
+      </div>
+    );
   }
 
   if (status === 'error') {

@@ -26,7 +26,7 @@ export default function QuickActions({
     setIsLoading(true);
     try {
       if (activeAction === 'add_note') {
-        await fetch('/api/actions/add-note', {
+        const res = await fetch('/api/actions/add-note', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -35,8 +35,19 @@ export default function QuickActions({
             note: noteText,
           }),
         });
+        if (res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Not authorized. You must be a moderator of this subreddit.');
+          setActiveAction(null);
+          return;
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to add mod note.');
+          return;
+        }
       } else if (activeAction === 'remove') {
-        await fetch('/api/actions/remove-content', {
+        const res = await fetch('/api/actions/remove-content', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -44,8 +55,19 @@ export default function QuickActions({
             contentId,
           }),
         });
+        if (res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Not authorized. You do not have the required moderator permissions (posts).');
+          setActiveAction(null);
+          return;
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to remove content.');
+          return;
+        }
       } else if (activeAction === 'ban') {
-        await fetch('/api/actions/ban-user', {
+        const res = await fetch('/api/actions/ban-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -54,10 +76,22 @@ export default function QuickActions({
             reason: banReason,
           }),
         });
+        if (res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Not authorized. You do not have the required moderator permissions (access).');
+          setActiveAction(null);
+          return;
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to ban user.');
+          return;
+        }
       }
       setActiveAction(null);
     } catch (err) {
       console.error('Action failed:', err);
+      alert('Action failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
